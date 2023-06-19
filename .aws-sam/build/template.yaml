@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AppSync Template for a Realtime App
+Parameters:
+  graphQLAPIName:
+    Type: String
+    Description: The name for the AppSync GraphQL API to be created.
+    Default: My Realtime App
+    MinLength: '1'
+    MaxLength: '32'
+Resources:
+  DataSourceDataPointTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: name
+        AttributeType: S
+      - AttributeName: createdAt
+        AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+      - AttributeName: name
+        KeyType: HASH
+      - AttributeName: createdAt
+        KeyType: RANGE
+      TableName: DataSourceDataPointTable
+  DataSourceDataPointTableRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: appsync.amazonaws.com
+      Policies:
+      - PolicyName: DataSourcePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:DeleteItem
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:UpdateItem
+            Resource:
+            - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataSourceDataPointTable}
+            - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataSourceDataPointTable}/*
+  AppSyncSampleAPI:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name:
+        Fn::Sub: ${graphQLAPIName}
+      AuthenticationType: API_KEY
+  AppSyncSampleSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      DefinitionS3Location: ../../appsync/schema.graphql
+  AppSyncApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+  AppSyncDataSourceDataPointTable:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      Name: DataSourceDataPointTable
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      ServiceRoleArn:
+        Fn::GetAtt:
+        - DataSourceDataPointTableRole
+        - Arn
+      DynamoDBConfig:
+        AwsRegion:
+          Ref: AWS::Region
+        TableName:
+          Ref: DataSourceDataPointTable
+      Type: AMAZON_DYNAMODB
+  PutItemFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      CodeS3Location: ../../appsync/resolvers/putItem.js
+      DataSourceName:
+        Fn::GetAtt:
+        - AppSyncDataSourceDataPointTable
+        - Name
+      Name: PutItemFunction
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+  AppSyncDataSourceDataPointPutResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      CodeS3Location: ../../appsync/resolvers/baseResolver.js
+      FieldName: createDataPoint
+      TypeName: Mutation
+      Kind: PIPELINE
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      PipelineConfig:
+        Functions:
+        - Fn::GetAtt:
+          - PutItemFunction
+          - FunctionId
+  GetItemFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      CodeS3Location: ../../appsync/resolvers/getItem.js
+      DataSourceName:
+        Fn::GetAtt:
+        - AppSyncDataSourceDataPointTable
+        - Name
+      Name: GetItemFunction
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+  AppSyncDataSourceDataPointGetResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - AppSyncSampleAPI
+        - ApiId
+      CodeS3Location: ../../appsync/resolvers/baseResolver.js
+      FieldName: getDataPoint
+      TypeName: Query
+      Kind: PIPELINE
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      PipelineConfig:
+        Functions:
+        - Fn::GetAtt:
+          - GetItemFunction
+          - FunctionId
+Outputs:
+  GraphQLApiId:
+    Description: Unique AWS AppSync GraphQL API Identifier
+    Value:
+      Fn::GetAtt:
+      - AppSyncSampleAPI
+      - ApiId
